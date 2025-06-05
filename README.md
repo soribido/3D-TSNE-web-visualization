@@ -11,7 +11,7 @@ This repository provides both a FastAPI backend (Python) that computes t-SNE and
 - [Interactivte 3D TSNE visualization](#interactivte-3d-tsne-visualization)
   - [Table of Contents](#table-of-contents)
   - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
+  - [Usage](#usage)
   - [Data Preparation](#data-preparation)
 
 ---
@@ -26,7 +26,7 @@ This repository provides both a FastAPI backend (Python) that computes t-SNE and
 
 ---
 
-## Installation
+## Usage
 
 1. **Clone this repository**  
    ```bash
@@ -48,6 +48,14 @@ This repository provides both a FastAPI backend (Python) that computes t-SNE and
    ```bash
    python main.py
    ```
+
+5. **Interact with the Visualization**
+
+* On the 3D t-SNE plot in your browser:
+
+  * Use the **mouse wheel (scroll)** to rotate and zoom the plot.
+
+  * **Click** on any point to display its corresponding image in the bottom-left corner.
 
 ---
 
