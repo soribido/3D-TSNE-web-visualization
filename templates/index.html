@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <title>Interactive 3D t-SNE Visualization</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            overflow: hidden; /* Prevent scrollbars from Three.js canvas */
+        }
+        #container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+            position: relative; /* For positioning child elements like legend/button */
+        }
+        #plot {
+            flex: 1;
+            background-color: #f0f0f0;
+            position: relative; /* Needed for absolute positioning of children like legend */
+        }
+        #info {
+            height: 250px;
+            border-top: 1px solid #ccc;
+            background-color: #f9f9f9;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            box-sizing: border-box;
+        }
+        #info img {
+            max-height: 200px;
+            max-width: 200px;
+            margin-right: 20px;
+            border: 1px solid #ddd;
+            object-fit: contain;
+        }
+        #info .meta {
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        #placeholder {
+            font-size: 16px;
+            color: #666;
+        }
+
+        /* Legend Styles */
+        #legend {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.85);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #ccc;
+            max-height: calc(100vh - 270px - 20px); /* Adjust based on info panel height and spacing */
+            overflow-y: auto;
+            z-index: 100;
+            font-size: 12px;
+            color: #333;
+        }
+        #legend h4 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            font-size: 14px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .legend-color-swatch {
+            display: inline-block;
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            border: 1px solid #777;
+        }
+
+        /* Reset View Button Styles */
+        #resetViewButton {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 8px 15px;
+            background-color: #337ab7; /* Bootstrap primary blue */
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 100;
+            font-size: 14px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #resetViewButton:hover {
+            background-color: #286090; /* Darker blue on hover */
+        }
+        #resetViewButton:active {
+            background-color: #204d74; 
+        }
+
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="plot">
+            <div id="legend" style="display: none;"></div>
+            <button id="resetViewButton" style="display: none;">Initial View</button>
+        </div>
+
+        <div id="info">
+            <div id="placeholder">
+                If you click point, Image and label will be displayed.
+            </div>
+            <div id="detail" style="display: none;">
+                <img id="detail-img" src="" alt="Selected Image" />
+                <div class="meta">
+                    <p><strong>Label:</strong> <span id="detail-label"></span></p>
+                    <p><strong>Index:</strong> <span id="detail-idx"></span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const plotDiv = document.getElementById("plot");
+        const placeholderDiv = document.getElementById("placeholder");
+        const detailDiv = document.getElementById("detail");
+        const detailImg = document.getElementById("detail-img");
+        const detailLabel = document.getElementById("detail-label");
+        const detailIdx = document.getElementById("detail-idx");
+        const legendDiv = document.getElementById("legend");
+        const resetViewButton = document.getElementById("resetViewButton");
+
+        let scene, camera, renderer, controls, pointsGroup;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        let initialCameraPosition = new THREE.Vector3();
+        let initialControlsTarget = new THREE.Vector3();
+
+        const colorPalette = [
+            0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff,
+            0xffa500, 0x800080, 0xa52a2a, 0x008000, 0x808000, 0x000080,
+            0xfa8072, 0x7fffd4, 0x4682b4, 0xd2b48c, 0xdc143c, 0x00ced1,
+            0xff4500, 0x2e8b57, 0x6a5acd, 0xdeb887, 0xda70d6, 0x7cfc00
+        ];
+        const labelToColor = {}; // Will store { label: colorValue }
+        let nextColorIndex = 0;
+
+        function getColorForLabel(label) {
+            if (typeof labelToColor[label] === 'undefined') {
+                labelToColor[label] = colorPalette[nextColorIndex % colorPalette.length];
+                nextColorIndex++;
+            }
+            return labelToColor[label];
+        }
+        
+        function createLegend() {
+            legendDiv.innerHTML = "<h4>Legend</h4>"; // Clear previous and add title
+            const sortedLabels = Object.keys(labelToColor).sort(); // Sort labels alphabetically
+
+            for (const label of sortedLabels) {
+                const color = labelToColor[label];
+                const legendItem = document.createElement("div");
+                legendItem.className = "legend-item";
+
+                const colorSwatch = document.createElement("span");
+                colorSwatch.className = "legend-color-swatch";
+                colorSwatch.style.backgroundColor = "#" + color.toString(16).padStart(6, '0');
+
+                const labelText = document.createElement("span");
+                labelText.textContent = label;
+
+                legendItem.appendChild(colorSwatch);
+                legendItem.appendChild(labelText);
+                legendDiv.appendChild(legendItem);
+            }
+            legendDiv.style.display = "block"; // Show the legend
+        }
+
+
+        function initThreeJS(data) {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf0f0f0);
+
+            camera = new THREE.PerspectiveCamera(75, plotDiv.clientWidth / plotDiv.clientHeight, 0.1, 5000);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(plotDiv.clientWidth, plotDiv.clientHeight);
+            plotDiv.appendChild(renderer.domElement);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.7);
+            directionalLight.position.set(50, 50, 50);
+            scene.add(directionalLight);
+            const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.3);
+            directionalLight2.position.set(-50, -50, -50); 
+            scene.add(directionalLight2);
+
+            pointsGroup = new THREE.Group();
+
+            if (!data || data.length === 0) {
+                console.warn("No data points to render.");
+                placeholderDiv.innerText = "표시할 데이터가 없습니다.";
+                legendDiv.style.display = "none";
+                resetViewButton.style.display = "none";
+                return;
+            }
+            
+            const pointSize = data.length > 1000 ? (data.length > 5000 ? 0.2 : 0.3) : 0.5;
+
+            data.forEach(d => {
+                const geometry = new THREE.SphereGeometry(pointSize, 12, 12); // Reduced segments for many points
+                const material = new THREE.MeshLambertMaterial({ color: getColorForLabel(d.label) });
+                const pointMesh = new THREE.Mesh(geometry, material);
+                pointMesh.position.set(d.x, d.y, d.z);
+                pointMesh.userData = { idx: d.idx, label: d.label, img_url: d.img_url };
+                pointsGroup.add(pointMesh);
+            });
+            scene.add(pointsGroup);
+
+            createLegend(); // Create legend after all labels and colors are processed
+            resetViewButton.style.display = "block"; // Show the reset button
+
+            const boundingBox = new THREE.Box3().setFromObject(pointsGroup);
+            const center = boundingBox.getCenter(new THREE.Vector3());
+            const size = boundingBox.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = camera.fov * (Math.PI / 180);
+            let cameraDistance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
+            cameraDistance = Math.max(cameraDistance, size.z / 2); // Ensure camera is outside the Z depth too
+            cameraDistance *= 1.7; 
+
+            camera.position.copy(center);
+            camera.position.z += cameraDistance;
+            camera.lookAt(center);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.target.copy(center);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Store initial camera state for reset
+            initialCameraPosition.copy(camera.position);
+            initialControlsTarget.copy(controls.target);
+            
+            animate();
+
+            plotDiv.addEventListener('click', onPlotClick, false);
+            window.addEventListener('resize', onWindowResize, false);
+            resetViewButton.addEventListener('click', function() {
+                if (camera && controls) {
+                    camera.position.copy(initialCameraPosition);
+                    controls.target.copy(initialControlsTarget);
+                    controls.update(); // Important for OrbitControls to apply changes
+                }
+            });
+        }
+
+        function onWindowResize() {
+            if (!camera || !renderer) return;
+            camera.aspect = plotDiv.clientWidth / plotDiv.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(plotDiv.clientWidth, plotDiv.clientHeight);
+        }
+
+        function onPlotClick(event) {
+            if (!camera || !pointsGroup || pointsGroup.children.length === 0) return;
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(pointsGroup.children, true);
+
+            if (intersects.length > 0) {
+                const clickedObject = intersects[0].object;
+                const meta = clickedObject.userData;
+                placeholderDiv.style.display = "none";
+                detailDiv.style.display = "flex";
+                detailImg.src = meta.img_url;
+                detailLabel.innerText = meta.label;
+                detailIdx.innerText = meta.idx;
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls) controls.update();
+            if (renderer && scene && camera) renderer.render(scene, camera);
+        }
+
+        fetch("/api/tsne_data")
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                initThreeJS(data); // Call init even if data is empty to handle placeholder text
+            })
+            .catch(error => {
+                console.error("Error fetching or processing t-SNE data:", error);
+                placeholderDiv.innerText = "Data Load Error: " + error.message;
+                legendDiv.style.display = "none";
+                resetViewButton.style.display = "none";
+            });
+    });
+    </script>
+</body>
+</html>
