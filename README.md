@@ -4,7 +4,7 @@ An interactive web-based tool for visualizing high-dimensional features (e.g., d
 Users can rotate, zoom, and click on individual points to view the corresponding original image.  
 This repository provides both a FastAPI backend (Python) that computes t-SNE and serves image files, and a minimal front-end (HTML + Three.js) for rendering the 3D scatter plot.  
 
-<center><img src='{{"/assets/sample_image.png" | relative_url}}' width="80%"></center>
+![sample_image](assets/sample_image.png)
 
 ## Table of Contents
 
